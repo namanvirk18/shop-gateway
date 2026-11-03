@@ -111,14 +111,19 @@ api = APIRouter(prefix="/api", dependencies=[Depends(current_user_id)])
 PROXY_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
 
 
-@api.api_route("/orders", methods=PROXY_METHODS)
-@api.api_route("/orders/{path:path}", methods=PROXY_METHODS)
-async def proxy_orders(
+async def forward(
     request: Request,
-    user_id: int = Depends(current_user_id),
-    client: httpx.AsyncClient = Depends(get_client),
-):
-    # Strip the "/api" prefix: /api/orders/5 -> /orders/5
+    client: httpx.AsyncClient,
+    base_url: str,
+    user_id: int,
+) -> Response:
+    """Forward an /api/* request to an upstream service and relay its response.
+
+    Strips the "/api" prefix, passes incoming headers through (tracing, locale,
+    etc.) except hop-by-hop and identity headers, and sets X-User-Id from the
+    authenticated user.
+    """
+    # /api/orders/5 -> /orders/5
     path = request.url.path[len("/api"):]
     if ".." in path.split("/"):
         raise HTTPException(status_code=400, detail="Invalid path")
@@ -131,7 +136,7 @@ async def proxy_orders(
     try:
         upstream = await client.request(
             request.method,
-            orders_url() + path,
+            base_url + path,
             params=request.query_params.multi_items(),
             headers=headers,
             content=await request.body(),
@@ -147,6 +152,16 @@ async def proxy_orders(
         status_code=upstream.status_code,
         headers=response_headers,
     )
+
+
+@api.api_route("/orders", methods=PROXY_METHODS)
+@api.api_route("/orders/{path:path}", methods=PROXY_METHODS)
+async def proxy_orders(
+    request: Request,
+    user_id: int = Depends(current_user_id),
+    client: httpx.AsyncClient = Depends(get_client),
+):
+    return await forward(request, client, orders_url(), user_id)
 
 
 @api.api_route("/{path:path}", methods=PROXY_METHODS)
