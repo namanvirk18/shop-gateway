@@ -100,3 +100,21 @@ def test_path_traversal_rejected(client):
     r = client.get("/api/orders/../admin", headers=auth(client))
     assert r.status_code in (400, 404)
     assert "request" not in captured or captured["request"].url.path.startswith("/orders")
+
+
+def test_tracing_and_locale_headers_forwarded(client):
+    headers = {
+        **auth(client),
+        "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+        "tracestate": "vendor=1",
+        "x-request-id": "req-123",
+        "accept-language": "fr-CA",
+    }
+    client.get("/api/orders/1", headers=headers)
+    up = captured["request"].headers
+    assert up["traceparent"] == headers["traceparent"]
+    assert up["tracestate"] == "vendor=1"
+    assert up["x-request-id"] == "req-123"
+    assert up["accept-language"] == "fr-CA"
+    assert "authorization" not in up
+    assert up["x-user-id"] == "1"
